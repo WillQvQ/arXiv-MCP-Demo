@@ -1,0 +1,10 @@
+{
+    "chat.agent.enabled": true,
+    "chat.mcp.discovery.enabled": true,
+    "chat.tools.autoApprove": false,
+    "github.copilot.chat.agent.runTasks": true,
+    "github.copilot.chat.agent.autoFix": true,
+    "chat.agent.maxRequests": 15,
+    "chat.extensionTools.enabled": true,
+    "chat.promptFiles": true
+}
