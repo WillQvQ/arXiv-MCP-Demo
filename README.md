@@ -1,3 +1,7 @@
+# Agent supported by Arxiv Citation Analyzer
+
+> Share Link https://s.trae.ai/a/d4edbb
+
 # ArXiv Citation Analyzer MCP Server
 
 一个用于根据 arxiv 文章链接自动检索引用和被引用的文章的工具，能够汇总它们的标题、摘要、链接等信息。

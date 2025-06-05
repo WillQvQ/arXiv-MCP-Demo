@@ -1,2 +1,4 @@
 *.json
 *.pyc
+.DS_Store
+md_files
