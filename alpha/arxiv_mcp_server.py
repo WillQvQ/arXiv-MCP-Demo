@@ -1,12 +1,14 @@
 import json
 import os
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastmcp import FastMCP
 import aiohttp
 import asyncio
 import re
 from dataclasses import dataclass, field
+import time
+from pathlib import Path
 
 @dataclass
 class ArxivPaper:
@@ -33,14 +35,41 @@ class SemanticScholarPaper:
     title: str
     abstract: str = ""
     externalIds: Dict[str, str] = field(default_factory=dict)
-
+    authors: List[str] = field(default_factory=list)
+    year: Optional[int] = None
+    venue: str = ""
+    citationCount: int = 0
+    url: str = ""
+    doi: str = ""
+    
     def to_dict(self):
         return {
             "paperId": self.paperId,
             "title": self.title,
             "abstract": self.abstract,
             "externalIds": self.externalIds,
+            "authors": self.authors,
+            "year": self.year,
+            "venue": self.venue,
+            "citationCount": self.citationCount,
+            "url": self.url,
+            "doi": self.doi,
             "ArXiv": self.externalIds.get("ArXiv")
+        }
+
+@dataclass
+class SearchResult:
+    papers: List[SemanticScholarPaper]
+    total: int
+    query: str
+    next_offset: Optional[int] = None
+    
+    def to_dict(self):
+        return {
+            "papers": [paper.to_dict() for paper in self.papers],
+            "total": self.total,
+            "query": self.query,
+            "next_offset": self.next_offset
         }
 
 
@@ -53,6 +82,25 @@ class ArxivMCPServer:
         # 移除config文件依赖，使用环境变量或默认值
         self.semantic_scholar_api_key = os.getenv('SEMANTIC_SCHOLAR_API_KEY', '')
         self.semantic_scholar_api_url = "https://api.semanticscholar.org/graph/v1/paper/"
+        self.papers_dir = Path("papers")
+        self.cache_dir = Path("papers/cache")
+        self._ensure_directories()
+    
+    def _ensure_directories(self):
+        """确保必要的目录存在"""
+        directories = [
+            self.papers_dir,
+            self.cache_dir,
+            self.papers_dir / "by_topic",
+            self.papers_dir / "by_author", 
+            self.papers_dir / "collections",
+            self.papers_dir / "reviews"
+        ]
+        
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+            if self.debug_mode:
+                print(f"[DEBUG] 确保目录存在: {directory}")
     
     async def _handle_rate_limit_retry(self, session, method, url, max_retries=3, **kwargs):
         """处理API请求的重试逻辑，特别是429错误"""
@@ -774,11 +822,282 @@ class ArxivMCPServer:
         if self.debug_mode:
             print(f"[DEBUG] 返回空列表")
         return []
+    
+    async def search_papers_by_keywords(self, query: str, limit: int = 10, offset: int = 0, 
+                                      fields: List[str] = None) -> SearchResult:
+        """根据关键词搜索论文"""
+        if self.debug_mode:
+            print(f"[DEBUG] 开始关键词搜索: {query}, limit={limit}, offset={offset}")
+        
+        if fields is None:
+            fields = ["paperId", "title", "abstract", "authors", "year", "venue", 
+                     "citationCount", "externalIds", "url"]
+        
+        async with aiohttp.ClientSession() as session:
+            url = "https://api.semanticscholar.org/graph/v1/paper/search"
+            params = {
+                "query": query,
+                "limit": limit,
+                "offset": offset,
+                "fields": ",".join(fields)
+            }
+            
+            headers = {}
+            if self.semantic_scholar_api_key:
+                headers["x-api-key"] = self.semantic_scholar_api_key
+                if self.debug_mode:
+                    print(f"[DEBUG] 使用API密钥进行搜索")
+            
+            try:
+                async with session.get(url, params=params, headers=headers) as response:
+                    if self.debug_mode:
+                        print(f"[DEBUG] 搜索响应状态码: {response.status}")
+                    
+                    if response.status == 200:
+                        data = await response.json()
+                        papers = []
+                        
+                        for paper_data in data.get('data', []):
+                            authors = [author.get('name', '') for author in paper_data.get('authors', [])]
+                            external_ids = paper_data.get('externalIds', {})
+                            
+                            paper = SemanticScholarPaper(
+                                paperId=paper_data.get('paperId', ''),
+                                title=paper_data.get('title', ''),
+                                abstract=paper_data.get('abstract', ''),
+                                authors=authors,
+                                year=paper_data.get('year'),
+                                venue=paper_data.get('venue', ''),
+                                citationCount=paper_data.get('citationCount', 0),
+                                externalIds=external_ids,
+                                url=paper_data.get('url', ''),
+                                doi=external_ids.get('DOI', '')
+                            )
+                            papers.append(paper)
+                        
+                        total = data.get('total', len(papers))
+                        next_offset = offset + limit if len(papers) == limit else None
+                        
+                        result = SearchResult(
+                            papers=papers,
+                            total=total,
+                            query=query,
+                            next_offset=next_offset
+                        )
+                        
+                        if self.debug_mode:
+                            print(f"[DEBUG] 搜索完成，找到 {len(papers)} 篇论文，总计 {total} 篇")
+                        
+                        return result
+                    
+                    else:
+                        response_text = await response.text()
+                        if self.debug_mode:
+                            print(f"[DEBUG] 搜索请求失败，状态码: {response.status}")
+                            print(f"[DEBUG] 错误响应: {response_text[:200]}...")
+                        
+                        return SearchResult(papers=[], total=0, query=query)
+                        
+            except Exception as e:
+                if self.debug_mode:
+                    print(f"[DEBUG] 搜索请求异常: {str(e)}")
+                return SearchResult(papers=[], total=0, query=query)
+    
+    def save_paper_to_markdown(self, paper: SemanticScholarPaper, 
+                              topic: str = "general", notes: str = "") -> str:
+        """将论文保存为markdown文件"""
+        if self.debug_mode:
+            print(f"[DEBUG] 保存论文到markdown: {paper.title[:50]}...")
+        
+        # 创建文件名（去除特殊字符）
+        safe_title = re.sub(r'[^\w\s-]', '', paper.title).strip()
+        safe_title = re.sub(r'[-\s]+', '-', safe_title)[:100]  # 限制长度
+        filename = f"{paper.paperId}_{safe_title}.md"
+        
+        # 确定保存路径
+        topic_dir = self.papers_dir / "by_topic" / topic
+        topic_dir.mkdir(parents=True, exist_ok=True)
+        filepath = topic_dir / filename
+        
+        # 生成markdown内容
+        markdown_content = self._generate_paper_markdown(paper, notes)
+        
+        # 保存文件
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+            
+            if self.debug_mode:
+                print(f"[DEBUG] 论文已保存到: {filepath}")
+            
+            return str(filepath)
+            
+        except Exception as e:
+            if self.debug_mode:
+                print(f"[DEBUG] 保存markdown文件失败: {str(e)}")
+            return ""
+    
+    def _generate_paper_markdown(self, paper: SemanticScholarPaper, notes: str = "") -> str:
+        """生成论文的markdown内容"""
+        content = f"# {paper.title}\n\n"
+        
+        # 基本信息
+        content += "## 基本信息\n\n"
+        content += f"- **Paper ID**: {paper.paperId}\n"
+        content += f"- **标题**: {paper.title}\n"
+        
+        if paper.authors:
+            authors_str = ", ".join(paper.authors)
+            content += f"- **作者**: {authors_str}\n"
+        
+        if paper.year:
+            content += f"- **发表年份**: {paper.year}\n"
+        
+        if paper.venue:
+            content += f"- **发表期刊/会议**: {paper.venue}\n"
+        
+        content += f"- **引用次数**: {paper.citationCount}\n"
+        
+        if paper.url:
+            content += f"- **论文链接**: [{paper.url}]({paper.url})\n"
+        
+        if paper.doi:
+            content += f"- **DOI**: {paper.doi}\n"
+        
+        # 外部链接
+        if paper.externalIds:
+            content += "\n### 外部链接\n\n"
+            for key, value in paper.externalIds.items():
+                if value:
+                    if key == "ArXiv":
+                        content += f"- **ArXiv**: [https://arxiv.org/abs/{value}](https://arxiv.org/abs/{value})\n"
+                    elif key == "DOI":
+                        content += f"- **DOI**: [https://doi.org/{value}](https://doi.org/{value})\n"
+                    else:
+                        content += f"- **{key}**: {value}\n"
+        
+        # 摘要
+        if paper.abstract:
+            content += "\n## 摘要\n\n"
+            content += f"{paper.abstract}\n"
+        
+        # 个人笔记
+        if notes:
+            content += "\n## 个人笔记\n\n"
+            content += f"{notes}\n"
+        
+        # 添加时间戳
+        content += f"\n---\n\n*保存时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n"
+        
+        return content
+    
+    def organize_papers_by_topic(self, topic: str) -> Dict[str, Any]:
+        """列出指定主题下的所有论文文件"""
+        if self.debug_mode:
+            print(f"[DEBUG] 组织主题论文: {topic}")
+        
+        topic_dir = self.papers_dir / "by_topic" / topic
+        if not topic_dir.exists():
+            return {"topic": topic, "papers": [], "message": "主题目录不存在"}
+        
+        papers = []
+        for md_file in topic_dir.glob("*.md"):
+            papers.append({
+                "filename": md_file.name,
+                "filepath": str(md_file),
+                "modified_time": datetime.fromtimestamp(md_file.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return {
+            "topic": topic,
+            "papers": papers,
+            "total_count": len(papers)
+        }
+    
+    def generate_literature_review(self, topic: str, output_filename: str = None) -> str:
+        """基于指定主题的论文生成文献综述"""
+        if self.debug_mode:
+            print(f"[DEBUG] 生成文献综述: {topic}")
+        
+        topic_dir = self.papers_dir / "by_topic" / topic
+        if not topic_dir.exists():
+            return f"错误：主题目录 {topic} 不存在"
+        
+        # 收集所有论文信息
+        papers_info = []
+        for md_file in topic_dir.glob("*.md"):
+            try:
+                with open(md_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # 简单提取标题和摘要
+                    lines = content.split('\n')
+                    title = lines[0].replace('# ', '') if lines else md_file.stem
+                    
+                    # 查找摘要部分
+                    abstract = ""
+                    in_abstract = False
+                    for line in lines:
+                        if line.strip() == "## 摘要":
+                            in_abstract = True
+                            continue
+                        elif line.startswith("##") and in_abstract:
+                            break
+                        elif in_abstract and line.strip():
+                            abstract += line + " "
+                    
+                    papers_info.append({
+                        "title": title,
+                        "abstract": abstract.strip(),
+                        "filename": md_file.name
+                    })
+            except Exception as e:
+                if self.debug_mode:
+                    print(f"[DEBUG] 读取文件 {md_file} 失败: {str(e)}")
+        
+        # 生成文献综述
+        if output_filename is None:
+            output_filename = f"{topic}_literature_review_{datetime.now().strftime('%Y%m%d')}.md"
+        
+        review_content = f"# {topic} 领域文献综述\n\n"
+        review_content += f"*生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n\n"
+        review_content += f"## 概述\n\n本综述基于 {len(papers_info)} 篇相关论文，对 {topic} 领域进行分析总结。\n\n"
+        
+        review_content += "## 论文列表\n\n"
+        for i, paper in enumerate(papers_info, 1):
+            review_content += f"### {i}. {paper['title']}\n\n"
+            if paper['abstract']:
+                review_content += f"**摘要**: {paper['abstract'][:200]}...\n\n"
+            review_content += f"*来源文件: {paper['filename']}*\n\n"
+        
+        review_content += "## 总结\n\n"
+        review_content += f"通过对 {len(papers_info)} 篇论文的分析，可以看出 {topic} 领域的研究现状和发展趋势。\n\n"
+        review_content += "## 参考文献\n\n"
+        for i, paper in enumerate(papers_info, 1):
+            review_content += f"{i}. {paper['title']}\n"
+        
+        # 保存综述文件
+        reviews_dir = self.papers_dir / "reviews"
+        reviews_dir.mkdir(parents=True, exist_ok=True)
+        review_filepath = reviews_dir / output_filename
+        
+        try:
+            with open(review_filepath, 'w', encoding='utf-8') as f:
+                f.write(review_content)
+            
+            if self.debug_mode:
+                print(f"[DEBUG] 文献综述已保存到: {review_filepath}")
+            
+            return str(review_filepath)
+            
+        except Exception as e:
+            if self.debug_mode:
+                print(f"[DEBUG] 保存文献综述失败: {str(e)}")
+            return f"错误：保存文献综述失败 - {str(e)}"
 
 # Create a global server instance
 server_instance = ArxivMCPServer()
 
-# Register the tool with FastMCP
+# Register the tools with FastMCP
 @mcp.tool()
 async def analyze_arxiv_citations(
     arxiv_url: str,
@@ -787,6 +1106,162 @@ async def analyze_arxiv_citations(
     server_instance.debug_mode = debug # 根据参数设置debug模式
     """获取arxiv文章的引用关系和相关论文信息"""
     return await server_instance.analyze_paper_citations(arxiv_url)
+
+@mcp.tool()
+async def search_papers_by_keywords(
+    query: str,
+    limit: int = 10,
+    offset: int = 0,
+    debug: bool = False
+) -> Dict[str, Any]:
+    """根据关键词搜索相关论文"""
+    server_instance.debug_mode = debug
+    result = await server_instance.search_papers_by_keywords(query, limit, offset)
+    return result.to_dict()
+
+@mcp.tool()
+def save_paper_to_markdown(
+    paper_id: str,
+    title: str,
+    abstract: str = "",
+    authors: List[str] = None,
+    year: Optional[int] = None,
+    venue: str = "",
+    citation_count: int = 0,
+    url: str = "",
+    doi: str = "",
+    external_ids: Dict[str, str] = None,
+    topic: str = "general",
+    notes: str = "",
+    debug: bool = False
+) -> str:
+    """将论文信息保存为markdown文件"""
+    server_instance.debug_mode = debug
+    
+    if authors is None:
+        authors = []
+    if external_ids is None:
+        external_ids = {}
+    
+    paper = SemanticScholarPaper(
+        paperId=paper_id,
+        title=title,
+        abstract=abstract,
+        authors=authors,
+        year=year,
+        venue=venue,
+        citationCount=citation_count,
+        url=url,
+        doi=doi,
+        externalIds=external_ids
+    )
+    
+    return server_instance.save_paper_to_markdown(paper, topic, notes)
+
+@mcp.tool()
+async def search_papers_by_author(
+    author_name: str,
+    limit: int = 10,
+    offset: int = 0,
+    debug: bool = False
+) -> Dict[str, Any]:
+    """根据作者姓名搜索其发表的论文"""
+    server_instance.debug_mode = debug
+    result = await server_instance.search_papers_by_keywords(f"author:{author_name}", limit, offset)
+    return result.to_dict()
+
+@mcp.tool()
+def organize_papers_by_topic(
+    topic: str,
+    debug: bool = False
+) -> Dict[str, Any]:
+    """列出指定主题下的所有论文文件"""
+    server_instance.debug_mode = debug
+    return server_instance.organize_papers_by_topic(topic)
+
+@mcp.tool()
+def generate_literature_review(
+    topic: str,
+    output_filename: str = None,
+    debug: bool = False
+) -> str:
+    """基于指定主题的论文生成文献综述"""
+    server_instance.debug_mode = debug
+    
+    topic_dir = server_instance.papers_dir / "by_topic" / topic
+    if not topic_dir.exists():
+        return f"错误：主题目录 {topic} 不存在"
+    
+    # 收集所有论文信息
+    papers_info = []
+    for md_file in topic_dir.glob("*.md"):
+        try:
+            with open(md_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # 简单提取标题和摘要
+                lines = content.split('\n')
+                title = lines[0].replace('# ', '') if lines else md_file.stem
+                
+                # 查找摘要部分
+                abstract = ""
+                in_abstract = False
+                for line in lines:
+                    if line.strip() == "## 摘要":
+                        in_abstract = True
+                        continue
+                    elif line.startswith("##") and in_abstract:
+                        break
+                    elif in_abstract and line.strip():
+                        abstract += line + " "
+                
+                papers_info.append({
+                    "title": title,
+                    "abstract": abstract.strip(),
+                    "filename": md_file.name
+                })
+        except Exception as e:
+            if debug:
+                print(f"[DEBUG] 读取文件 {md_file} 失败: {str(e)}")
+    
+    # 生成文献综述
+    if output_filename is None:
+        output_filename = f"{topic}_literature_review_{datetime.now().strftime('%Y%m%d')}.md"
+    
+    review_content = f"# {topic} 领域文献综述\n\n"
+    review_content += f"*生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n\n"
+    review_content += f"## 概述\n\n本综述基于 {len(papers_info)} 篇相关论文，对 {topic} 领域进行分析总结。\n\n"
+    
+    review_content += "## 论文列表\n\n"
+    for i, paper in enumerate(papers_info, 1):
+        review_content += f"### {i}. {paper['title']}\n\n"
+        if paper['abstract']:
+            review_content += f"**摘要**: {paper['abstract'][:200]}...\n\n"
+        review_content += f"*来源文件: {paper['filename']}*\n\n"
+    
+    review_content += "## 总结\n\n"
+    review_content += f"通过对 {len(papers_info)} 篇论文的分析，可以看出 {topic} 领域的研究现状和发展趋势。\n\n"
+    review_content += "## 参考文献\n\n"
+    for i, paper in enumerate(papers_info, 1):
+        review_content += f"{i}. {paper['title']}\n"
+    
+    # 保存综述文件
+    reviews_dir = server_instance.papers_dir / "reviews"
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    review_filepath = reviews_dir / output_filename
+    
+    try:
+        with open(review_filepath, 'w', encoding='utf-8') as f:
+            f.write(review_content)
+        
+        if debug:
+            print(f"[DEBUG] 文献综述已保存到: {review_filepath}")
+        
+        return str(review_filepath)
+        
+    except Exception as e:
+        if debug:
+            print(f"[DEBUG] 保存文献综述失败: {str(e)}")
+        return f"错误：保存文献综述失败 - {str(e)}"
 
 if __name__ == "__main__":
     # Run the FastMCP server

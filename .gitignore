@@ -1,4 +1,9 @@
 *.json
+*.html
 *.pyc
+*.pdf
+*.txt
+.coverage
 .DS_Store
+downloads
 md_files
