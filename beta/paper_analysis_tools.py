@@ -16,7 +16,8 @@ paper_manager = PaperManager(debug=Config.DEBUG_MODE)
 
 async def analyze_paper_citations(
     paper_identifier: str,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Analyze citations for a paper using ArXiv ID, DOI, or Semantic Scholar ID.
     
@@ -121,7 +122,8 @@ async def search_papers_by_keywords(
 async def search_papers_by_author(
     author_name: str,
     max_results: int = 20,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Search for papers by author name.
     
@@ -168,7 +170,8 @@ async def get_paper_details(
     include_citations: bool = False,
     include_references: bool = False,
     include_recommendations: bool = False,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Get detailed information about a specific paper.
     
@@ -221,7 +224,8 @@ async def get_paper_details(
 
 async def get_arxiv_paper(
     arxiv_id: str,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Get ArXiv paper details by ArXiv ID.
     
@@ -259,7 +263,8 @@ async def search_arxiv_papers(
     query: str,
     max_results: int = 10,
     sort_by: str = "relevance",
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Search ArXiv for papers.
     
@@ -297,7 +302,8 @@ async def save_paper_to_markdown(
     paper_id: str,
     topic: str = "general",
     notes: str = "",
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Save a paper to markdown format.
     
@@ -338,7 +344,8 @@ async def save_arxiv_paper_to_markdown(
     arxiv_id: str,
     topic: str = "general",
     notes: str = "",
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Save an ArXiv paper to markdown format.
     
@@ -379,7 +386,8 @@ async def save_arxiv_paper_to_markdown(
 
 
 async def organize_papers_by_topic(
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Get organization of papers by topic.
     
@@ -411,7 +419,8 @@ async def generate_literature_review(
     topic: str,
     requirements: List[str],
     output_filename: Optional[str] = None,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Generate a literature review for papers in a topic.
     
@@ -448,7 +457,8 @@ async def create_requirement_based_review(
     paper_ids: List[str],
     requirements: List[str],
     output_filename: Optional[str] = None,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Create a requirement-based literature review from specific papers.
     
@@ -494,7 +504,8 @@ async def create_requirement_based_review(
 
 async def search_papers_in_collection(
     keyword: str,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Search for papers in the local collection by keyword.
     
@@ -526,7 +537,8 @@ async def search_papers_in_collection(
 async def get_paper_recommendations(
     paper_id: str,
     max_results: int = 10,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Get paper recommendations based on a paper.
     

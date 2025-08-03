@@ -14,7 +14,8 @@ except ImportError:
 
 
 async def get_service_info(
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Get service information and available tools list.
     

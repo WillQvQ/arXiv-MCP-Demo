@@ -24,7 +24,8 @@ async def download_arxiv_pdf(
     arxiv_id: str,
     download_dir: str = "./downloads",
     filename: Optional[str] = None,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Download PDF file from ArXiv using paper ID.
     
@@ -118,7 +119,8 @@ async def extract_pdf_text(
     pdf_path: str,
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Extract text content from a PDF file.
     
@@ -202,7 +204,8 @@ async def convert_pdf_to_text(
     end_page: Optional[int] = None,
     include_page_numbers: bool = True,
     encoding: str = "utf-8",
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """Convert PDF file to plain text file.
     
@@ -306,7 +309,8 @@ async def process_arxiv_paper(
     download_dir: str = "./downloads",
     extract_text: bool = True,
     save_text_file: bool = True,
-    debug: bool = Config.DEBUG_MODE
+    debug: bool = Config.DEBUG_MODE,
+    explanation: str = ""
 ) -> Dict[str, Any]:
     """One-stop ArXiv paper processing: download PDF and optionally extract text.
     
