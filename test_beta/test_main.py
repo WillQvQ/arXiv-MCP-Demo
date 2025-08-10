@@ -7,7 +7,10 @@ from pathlib import Path
 
 # Add the beta directory to the path for imports
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / 'beta'))
+import os
+beta_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'beta'))
+if beta_path not in sys.path:
+    sys.path.insert(0, beta_path)
 
 from main import app
 from models import SemanticScholarPaper, ArxivPaper, AuthorInfo, CitationAnalysisResult, SearchResult
@@ -625,7 +628,7 @@ class TestMCPServer:
     @pytest.mark.asyncio
     async def test_extract_pdf_text_no_pypdf(self):
         """Test PDF text extraction when pypdf is not available."""
-        with patch('pdf_processing_tools.PdfReader', None):
+        with patch('pdf_processing_tools.PDF_READER_AVAILABLE', False):
             result = await extract_pdf_text('/fake/path/test.pdf')
             
             assert result['success'] == False

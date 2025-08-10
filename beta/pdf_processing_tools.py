@@ -9,12 +9,15 @@ from typing import Dict, Any, Optional
 # PDF处理相关导入
 try:
     from pypdf import PdfReader  # type: ignore
+    PDF_READER_AVAILABLE = True
 except ImportError:
     try:
         from PyPDF2 import PdfReader  # type: ignore
+        PDF_READER_AVAILABLE = True
     except ImportError:
         print("Warning: PDF processing unavailable. Install pypdf: pip install pypdf")
-        PdfReader = None
+        PdfReader = None  # type: ignore
+        PDF_READER_AVAILABLE = False
 
 from config import Config
 from utils import debug_print, extract_arxiv_id
@@ -24,8 +27,7 @@ async def download_arxiv_pdf(
     arxiv_id: str,
     download_dir: str = "./downloads",
     filename: Optional[str] = None,
-    debug: bool = Config.DEBUG_MODE,
-    explanation: str = ""
+    debug: bool = Config.DEBUG_MODE
 ) -> Dict[str, Any]:
     """Download PDF file from ArXiv using paper ID.
     
@@ -119,8 +121,7 @@ async def extract_pdf_text(
     pdf_path: str,
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
-    debug: bool = Config.DEBUG_MODE,
-    explanation: str = ""
+    debug: bool = Config.DEBUG_MODE
 ) -> Dict[str, Any]:
     """Extract text content from a PDF file.
     
@@ -135,7 +136,7 @@ async def extract_pdf_text(
     """
     debug_print(f"Extracting text from PDF: {pdf_path}", debug)
     
-    if not PdfReader:
+    if not PDF_READER_AVAILABLE:
         return {
             'success': False,
             'error': 'PDF processing unavailable. Install pypdf: pip install pypdf'
@@ -204,8 +205,7 @@ async def convert_pdf_to_text(
     end_page: Optional[int] = None,
     include_page_numbers: bool = True,
     encoding: str = "utf-8",
-    debug: bool = Config.DEBUG_MODE,
-    explanation: str = ""
+    debug: bool = Config.DEBUG_MODE
 ) -> Dict[str, Any]:
     """Convert PDF file to plain text file.
     
@@ -223,7 +223,7 @@ async def convert_pdf_to_text(
     """
     debug_print(f"Converting PDF to text: {pdf_path}", debug)
     
-    if not PdfReader:
+    if not PDF_READER_AVAILABLE:
         return {
             'success': False,
             'error': 'PDF processing unavailable. Install pypdf: pip install pypdf'
@@ -239,12 +239,12 @@ async def convert_pdf_to_text(
         # 设置输出路径
         if not output_path:
             pdf_file = Path(pdf_path)
-            output_path = pdf_file.with_suffix('.txt')
+            output_file_path = pdf_file.with_suffix('.txt')
         else:
-            output_path = Path(output_path)
+            output_file_path = Path(output_path)
         
         # 确保输出目录存在
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_file_path.parent.mkdir(parents=True, exist_ok=True)
         
         reader = PdfReader(pdf_path)
         total_pages = len(reader.pages)
@@ -274,17 +274,17 @@ async def convert_pdf_to_text(
                 extracted_text += "\n"
         
         # 写入文本文件
-        with open(output_path, 'w', encoding=encoding) as f:
+        with open(output_file_path, 'w', encoding=encoding) as f:
             f.write(extracted_text.strip())
         
         word_count = len(extracted_text.split())
         char_count = len(extracted_text)
-        file_size = os.path.getsize(output_path)
+        file_size = os.path.getsize(output_file_path)
         
         return {
             'success': True,
             'pdf_path': pdf_path,
-            'output_path': str(output_path),
+            'output_path': str(output_file_path),
             'total_pages': total_pages,
             'extracted_pages': len(pages_to_extract),
             'word_count': word_count,
@@ -309,8 +309,7 @@ async def process_arxiv_paper(
     download_dir: str = "./downloads",
     extract_text: bool = True,
     save_text_file: bool = True,
-    debug: bool = Config.DEBUG_MODE,
-    explanation: str = ""
+    debug: bool = Config.DEBUG_MODE
 ) -> Dict[str, Any]:
     """One-stop ArXiv paper processing: download PDF and optionally extract text.
     
@@ -347,7 +346,7 @@ async def process_arxiv_paper(
         }
         
         # Step 2: Extract text if requested
-        if extract_text and PdfReader:
+        if extract_text and PDF_READER_AVAILABLE:
             text_result = await extract_pdf_text(pdf_path=pdf_path, debug=debug)
             
             if text_result.get('success'):
@@ -381,7 +380,7 @@ async def process_arxiv_paper(
             else:
                 result['text_extracted'] = False
                 result['text_extraction_error'] = text_result.get('error')
-        elif extract_text and not PdfReader:
+        elif extract_text and not PDF_READER_AVAILABLE:
             result['text_extracted'] = False
             result['text_extraction_error'] = 'PDF processing unavailable. Install pypdf: pip install pypdf'
         
